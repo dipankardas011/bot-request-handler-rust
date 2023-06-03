@@ -8,6 +8,9 @@ use std::println;
 use anyhow::Result;
 use reqwest;
 
+const BOT_URL: &str= "https://dipankardas011-gpt2-bot.hf.space/generate";
+const BOT_TEXT_FIELD: &str = "text";
+
 async fn foo(bot_url: String) -> Result<String, reqwest::Error> {
     let response = reqwest::get(bot_url).await?;
 
@@ -17,7 +20,7 @@ async fn foo(bot_url: String) -> Result<String, reqwest::Error> {
         let text = response.text().await?;
         resp = text;
     } else {
-        println!("Response was not 200 OK");
+        println!("BOT Response was not StatusCode::OK");
     }
 
     Ok(resp)
@@ -53,14 +56,11 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
                     return Ok(error_response);
                 }
             };
-            println!("Body -> {body_str}");
 
             let mut mod_req: String = String::new();
             mod_req = body_str.replace(" ", "%20");
 
-            println!("Body with %20 -> {mod_req}");
-
-            let bot_uri = format!("https://dipankardas011-gpt2-bot.hf.space/generate?text={mod_req}");
+            let bot_uri = format!("{BOT_URL}?{BOT_TEXT_FIELD}={mod_req}");
             
             if mod_req.len() as i32 > 0 {
                 let mut response_bot: String = String::new();
