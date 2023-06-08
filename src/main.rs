@@ -8,6 +8,9 @@ use std::println;
 use anyhow::Result;
 use reqwest;
 
+use std::sync::Arc;
+use tera::{Tera, Context};
+
 const BOT_URL: &str= "https://dipankardas011-gpt2-bot.hf.space/generate";
 const BOT_TEXT_FIELD: &str = "text";
 
@@ -39,15 +42,46 @@ fn create_response(status: StatusCode, message: String) -> Response<Body> {
         .unwrap()
 }
 
-async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+fn parse_user_text(body_str: &str) -> String {
+    let params: Vec<&str> = body_str.split('&').collect();
+    for param in params {
+        let key_value: Vec<&str> = param.split('=').collect();
+        if key_value.len() == 2 && key_value[0] == "query" {
+            return key_value[1].to_string();
+        }
+    }
+    String::new()
+}
+
+async fn handle_request(req: Request<Body>, tera: Arc<Tera>) -> Result<Response<Body>, Infallible> {
+    println!("{:?}", req.headers());
     match (req.method(), req.uri().path()) {
         (&hyper::Method::GET, "/") => {
-            Ok(Response::new(Body::from("Hello, World!")))
+            // Render the index.html template
+            let context = Context::new();
+            let rendered = tera.render("index.html", &context).unwrap();
+
+
+            Ok(Response::new(Body::from(rendered)))
         },
         (&hyper::Method::GET, "/ping") => {
             Ok(Response::new(Body::from("Pong!")))
         },
-        (&hyper::Method::GET, "/bot") => {
+        // (&hyper::Method::GET, path) if path.starts_with("/static/") => {
+        //     // Serve static files
+        //     let file_path = format!(".{}", path);
+        //     let file_contents = match tokio::fs::read(file_path).await {
+        //         Ok(contents) => contents,
+        //         Err(_) => {
+        //             let mut not_found = Response::default();
+        //             *not_found.status_mut() = StatusCode::NOT_FOUND;
+        //             return Ok(not_found);
+        //         }
+        //     };
+
+        //     Ok(Response::new(Body::from(file_contents)))
+        // },
+        (&hyper::Method::POST, "/bot") => {
             let body_str = match extract_body(req).await {
                 Ok(body) => body,
                 Err(_) => {
@@ -57,26 +91,25 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
                 }
             };
 
-            let mut mod_req: String = String::new();
-            mod_req = body_str.replace(" ", "%20");
+            let mut user_text = parse_user_text(&body_str);
+            user_text = user_text.replace(" ", "%20");
 
-            let bot_uri = format!("{BOT_URL}?{BOT_TEXT_FIELD}={mod_req}");
-            
-            if mod_req.len() as i32 > 0 {
-                let mut response_bot: String = String::new();
-                match foo(bot_uri).await {
-                    Ok(bot_response) => {
-                        response_bot = bot_response;
-                    },
-                    Err(e) => println!("Error occurred: {:?}", e),
-                }
-                println!("Bot req is present");
-                return Ok(create_response(StatusCode::OK, response_bot));
+            let bot_uri = format!("{}?{}={}", BOT_URL, BOT_TEXT_FIELD, user_text);
 
-            } else {
-                println!("Bot req is absent");
-                return Ok(create_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error".to_string()));
+            let mut response_bot: String = String::new();
+            match foo(bot_uri).await {
+                Ok(bot_response) => {
+                    response_bot = bot_response;
+                },
+                Err(e) => println!("Error occurred: {:?}", e),
             }
+
+            // Render the index.html template with the answer
+            let mut context = Context::new();
+            context.insert("answer", &response_bot);
+            let rendered = tera.render("index.html", &context).unwrap();
+
+            return Ok(create_response(StatusCode::OK, rendered));
         },
         _ => {
             let mut not_found = Response::default();
@@ -88,8 +121,11 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
 
 #[tokio::main]
 async fn main() {
+    let tera = Arc::new(Tera::new("templates/**/*.html").unwrap());
+
     let make_svc = make_service_fn(|_conn| {
-        async { Ok::<_, Infallible>(service_fn(handle_request)) }
+        let tera = tera.clone();
+        async { Ok::<_, Infallible>(service_fn(move |req| handle_request(req, tera.clone()))) }
     });
 
     let addr = ([127, 0, 0, 1], 3000).into();
