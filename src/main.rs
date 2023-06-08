@@ -128,7 +128,7 @@ async fn main() {
         async { Ok::<_, Infallible>(service_fn(move |req| handle_request(req, tera.clone()))) }
     });
 
-    let addr = ([127, 0, 0, 1], 3000).into();
+    let addr = ([0, 0, 0, 0], 3000).into();
     let server = Server::bind(&addr).serve(make_svc);
 
     println!("Server running on http://{}", addr);
